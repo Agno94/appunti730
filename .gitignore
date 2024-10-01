@@ -1,0 +1,40 @@
+# My local files
+*.http
+*.local
+
+# VSCode
+*.code-workspace
+.vscode
+!.vscode/extensions.json
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Npm file, package and directories
+node_modules/
+.npm
+
+# dotenv environment
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# wrangler project
+.dev.vars
+.wrangler/
+
+# Build & temporary dirs
+.next
+dist/
+.DS_Store
+.cache/
+.temp
+.cache
