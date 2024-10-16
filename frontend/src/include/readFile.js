@@ -1,12 +1,21 @@
-function readFile(file){
+export function readTextFile(file){
   return new Promise((resolve, reject) => {
-    var fr = new FileReader();  
+    var fr = new FileReader()
     fr.onload = () => {
-      resolve(fr.result )
+      resolve(fr.result)
     };
-    fr.onerror = reject;
-    fr.readAsText(file);
+    fr.onerror = reject
+    fr.readAsText(file)
   });
 }
 
-export default readFile
+export function readBinaryFile(file){
+  return new Promise((resolve, reject) => {
+    var fr = new FileReader()
+    fr.onload = () => {
+      resolve(fr.result)
+    };
+    fr.onerror = reject
+    fr.readAsArrayBuffer(file)
+  });
+}

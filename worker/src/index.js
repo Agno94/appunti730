@@ -81,8 +81,9 @@ async function postSaveEntry(request, env, url) {
 		return httpError("Bad Request: Missing fields", 400)
 	}
 
-	if (content.length > 4*10**6) {
-		return httpError("File too large", 400)
+	let originalMBs = content.length * 0.75 / 2**20
+	if (originalMBs > 6) {
+		return httpError(`File troppo grande: ${originalMBs}>6MiB`, 400)
 	}
 
 	const peopleRaw = await env.KV_NAMESPACE.get('people')

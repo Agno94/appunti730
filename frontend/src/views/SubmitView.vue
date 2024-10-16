@@ -54,7 +54,7 @@
       <label class="label">Giustificativo</label>
       <div class="field-body">
 
-        <div class="file is-boxed has-name" :class="{'is-warning': !fileContent}">
+        <div class="file is-boxed is-fullwidth is-centered" :class="{'is-warning': !fileContent}">
           <label class="file-label">
             <input
               class="file-input"
@@ -63,20 +63,20 @@
               @change="fileChange"
               :class="{'is-loading': uploading}"
             >
-            <span class="file-cta">
-              <span class="file-icon">
-                🗃️
-                <!-- <faIcon :icon="['fas', 'cloud-upload']" /> -->
+            <span class="file-cta has-text-centered">
+              <span class="file-icon">🗃️</span>
+              <span class="file-label" v-if="isFilePresent">
+                Cambia file…
               </span>
-              <span class="file-label">
+              <span class="file-label" v-else>
                 Scegli un file…
               </span>
-            </span>
-            <span class="file-name" v-if="filename">
-              {{ filename }}
-            </span>
-            <span class="file-name has-text-grey-light" v-else>
-              scegli un file...
+              <span class="file-label is-size-7" v-if="isFilePresent">
+                <br>
+                {{  filename }}
+                <br>
+                {{ fileDimension }}
+              </span>
             </span>
           </label>
         </div>
@@ -103,18 +103,17 @@
 
     <section class="columns">
       <section class="column">
-        <button class="button" :disabled="!canSave" @click="submitEntry" :class="{'is-loading': uploading}">
+        <button class="button is-info" :disabled="!canSave" @click="submitEntry" :class="{'is-loading': uploading}">
           Aggiungi
         </button>
       </section>
     </section>
 
-
   </main>
 </template>
 
 <script>
-import readFile from '@/include/readFile.js'
+import { readBinaryFile } from '@/include/readFile.js'
 import { useUsersStore } from '@/stores/users'
 
 export default {
@@ -167,27 +166,46 @@ export default {
       return entryImporto && (entryImporto > 0)
     },
 
-    canSave({ isPersonValid, isImportoValid, isYearValid, fileContent}) {
-      return (isPersonValid && isImportoValid && isYearValid && fileContent && fileContent.length)
+    isFilePresent({fileContent}) {
+      return (fileContent && fileContent.length)
     },
 
-    postPayload({personName, entryDate, entryImporto, entryYear, fileContent}) {
-      if (!this.canSave) return
-      let formattedDate = entryDate
-      console.log(new Date, 'canSave', this.canSave)
+    fileDimension({isFilePresent, fileContent}) {
+      if (!isFilePresent) return
+      let length = fileContent.length
+      let formatter = new Intl.NumberFormat('it-IT', { maximumSignificantDigits: 3 })
+      if (length < 10**3) return `${formatter.format(length)}B`
+      if (length < 10**6) return `${formatter.format(length / 10**3)}KB`
+      return `${formatter.format(length / 10**6)}MB`
+    },
+
+    canSave({ isPersonValid, isImportoValid, isYearValid, fileContent}) {
+      return (isPersonValid && isImportoValid && isYearValid && isFilePresent)
+    },
+
+    b64EncodedFileContent({fileContent}) {
+      if (!isFilePresent) return
       let b64Content
       try {
-        b64Content = btoa(unescape(encodeURIComponent(fileContent)))
+        const binString = Array.from(fileContent, (byte) => String.fromCodePoint(byte),).join("")
+        b64Content = btoa(binString)
         console.log(new Date, 'b64content', b64Content.length)
+        return b64Content
       } catch (e) {
         console.log(e)
+        return
       }
+    },
+
+    postPayload({personName, entryDate, entryImporto, entryYear, b64EncodedFileContent}) {
+      if (!this.canSave) return
+      let formattedDate = entryDate
       return {
         user: personName,
         date: formattedDate,
         importo: entryImporto,
         year: entryYear,
-        content: b64Content,
+        content: b64EncodedFileContent,
       }
     }
 
@@ -207,9 +225,9 @@ export default {
 
       this.filename = file.name
       this.uploading = true
-      readFile(file)
+      readBinaryFile(file)
         .then((fileContent) => {
-          this.fileContent = fileContent
+          this.fileContent = new Uint8Array(fileContent)
         })
         .catch((e) => {
           this.errorMessage = 'Errore caricamento file'
