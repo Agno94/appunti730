@@ -20,7 +20,7 @@
       <div class="field column">
         <label class="label">Anno</label>
         <div class="control">
-          <div class="select is-fullwidth"  :class="{'is-warning': !isYearValid}">
+          <div class="select is-fullwidth" :class="{'is-warning': !isYearValid}">
             <select v-model="fiscalYear">
               <option value=2023>2023 (modello 730 2024)</option>
               <option value=2024>2024 (modello 730 2025)</option>
@@ -35,13 +35,55 @@
         <button class="button is-link is-outlined mr-1" title="Refresh"
           @click="fetchList" :disabled="!canFetch || loadingFetch">⭮</button>
           <button class="button is-info is-outlined mr-1" title="Save"
-          @click="saveTable" :disabled="!hasAnyEntry">🖫</button>
-        <button class="button is-info is-outlined" title="Download"
-          @click="downloadFile" :disabled="!hasAnyEntry">⇩</button>
+          @click="saveTable" :disabled="!hasAnyEntry">
+          <span v-if="hasAnyEntry">📦</span><span v-else>&nbsp;</span>
+        </button>
+        <button class="button is-info is-outlined" title="Download tabella"
+          @click="downloadEntriesTable" :disabled="!hasAnyEntry">
+          <span v-if="hasAnyEntry">💾</span><span v-else>&nbsp;</span>
+        </button>
       </div>
     </div>
 
-    <p v-for="entry in entriesList">{{ entry.id }} / {{ entry.importo }} / {{ entry.date }}</p>
+    <article class="message is-danger" v-if="lastRequestErrorMessage">
+      <div class="message-header is-size-7">
+        <p>Errore</p>
+        <button class="delete" aria-label="delete" @click="lastRequestErrorMessage = null"></button>
+      </div>
+      <div class="message-body is-size-7">{{ lastRequestErrorMessage }}</div>
+    </article>
+
+    <p v-if="!canFetch">Seleziona filtri</p>
+
+    <p v-else-if="!entriesList.length">Nessuna voce</p>
+
+    <table class="table is-fullwidth" v-else>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Data</th>
+          <th>Importo</th>
+          <th></th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="entry in entriesList" :key="entry.id">
+          <td :title="entry.id">#</td>
+          <td>{{entry.date}}</td>
+          <td>{{entry.importo}}</td>
+          <td>
+            <span v-if="downloadingOneRequest">⭮</span>
+            <a v-else @click="downloadEntryContent(entry.id)" title="Download giustificativo">📃</a>
+          </td>
+          <td>
+            <span v-if="sendingDeleteRequest">⭮</span>
+            <a @click="deleteEntry(entry.id)" title="Download giustificativo">🗑️</a>
+          </td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table>
 
   </main>
 </template>
@@ -68,10 +110,11 @@ export default {
       loadingFetch: false,
       entriesList: [],
 
-      fileContent: null,
-      fileError: null,
-      filename: null,
-      uploading: false,
+      sendingDeleteRequest: false,
+      downloadingOneRequest: false,
+      lastRequestErrorMessage: null,
+
+      downloadOneFileContent: null,
     }
   },
 
@@ -101,13 +144,28 @@ export default {
       })
     },
 
-    hasAnyEntry() {
-      return false
+    hasAnyEntry({ canFetch, entriesList}) {
+      if (!canFetch) return false
+      return entriesList.length
     },
 
   },
 
   methods: {
+
+    downloadPlain(content, filename, option) {
+      let blob  = new Blob( [content, ], option, )
+      let link  = document.createElement('a')
+
+      link.href     = window.URL.createObjectURL(blob)
+      link.download = filename.replace(/\s/g, '')
+
+      document.body.appendChild(link)
+
+      link.click()
+      link.remove()
+    },
+
     fetchList() {
       if (this.loadingFetch) return
       let token = this.usersStore.getToken
@@ -127,20 +185,80 @@ export default {
         this.entriesList = body.data
       })
       .catch((err) => {
-        console.log(err.message)
+        this.lastRequestErrorMessage = err.message
       })
       .then(() => {
         this.loadingFetch = false
       })
     },
 
-    downloadFile() {
-      // ...
+    downloadEntriesTable() {
+      let { fiscalYear, personName } = this
+      let length = this.entriesList.length
+
+      let header = [
+        '#',
+        'Data',
+        'Importo',
+      ].join(';')
+
+      let csv = this.entriesList.reduce( (csv, e, index) => {
+        let row = [
+          e.id,
+          e.date,
+          e.importo,
+        ].map(v => String(v))
+
+        return index < length
+          ? csv + row.join(';') + '\n'
+          : csv + row.join(';')
+      }, header + '\n')
+
+      let filename  = `voci730_${fiscalYear}_${personName}.csv`
+
+      this.downloadPlain(csv, filename, {type: 'text/csv'})
     },
 
     saveTable() {
       // ..
     },
+
+    downloadEntryContent(entryId) {
+      // ..
+    },
+
+    deleteEntry(entryId) {
+      if (this.sendingDeleteRequest) return
+      let token = this.usersStore.getToken
+
+      this.sendingDeleteRequest = true
+      this.lastRequestErrorMessage = true
+
+      fetch(`${import.meta.env.VITE_API_URL}/entry`, {
+        method: "DELETE",
+        body: JSON.stringify({
+          id: entryId,
+          year: this.fiscalYear,
+          user: this.personName,
+        }),
+        headers: {
+          "Authorization": token,
+        }
+      })
+      .then(async (response) => {
+        const body = await response.json()
+        if (body.error) throw body
+      })
+      .catch((err) => {
+        this.lastRequestErrorMessage = err.message
+      })
+      .then(async () => {
+        await new Promise(resolve => setTimeout(resolve, 100))
+        this.sendingDeleteRequest = false
+        this.fetchList()
+      })
+    },
+
   },
 
   watch: {

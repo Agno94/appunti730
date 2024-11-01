@@ -124,6 +124,55 @@ async function postSaveEntry(request, env, url) {
 	})
 }
 
+async function deleteEntry(request, env, url) {
+	let eid, user, year
+	try {
+		const payload = await request.json()
+		eid = payload.id
+		user = payload.user
+		year = payload.year
+	} catch (e) {
+		return httpError("Bad Request: invalid payload", 400)
+	}
+
+	if (!eid || !user || !year) {
+		return httpError("Bad Request: Missing fields", 400)
+	}
+
+	const peopleRaw = await env.KV_NAMESPACE.get('people')
+	if (!peopleRaw) throw {message: "Not ready"}
+
+	const selectedPeople = JSON.parse(peopleRaw).filter(u => (u.name == user))
+	if (selectedPeople.length != 1) {
+		return httpError(`Bad Request: Invalid user ${user}`, 400)
+	}
+
+	const person = selectedPeople[0]
+	const uid = person.id
+
+	const entryContentKey = `U${uid}::E${eid}::content`
+	const userEntriesKey = `U${uid}::entries${year}`
+
+	const userEntriesRaw = await env.KV_NAMESPACE.get(userEntriesKey)
+	let userEntries = []
+	if (userEntriesRaw) {
+		userEntries = JSON.parse(userEntriesRaw)
+	}
+	let filteredEntries = userEntries.filter(e => (e.id === eid))
+	if (filteredEntries.length !== 1) {
+		return httpError("Bad Request: id not found", 400)
+	}
+	userEntries = userEntries.filter(e => (e.id != eid))
+
+	await env.KV_NAMESPACE.delete(entryContentKey)
+	await env.KV_NAMESPACE.put(userEntriesKey, JSON.stringify(userEntries))
+
+	return Response.json({
+		message: `Entry with id ${eid} deleted`,
+		data: filteredEntries[0],
+	})
+}
+
 async function getEntries(request, env, url) {
 	const year = url.searchParams.get("year")
 	const name = url.searchParams.get("person")
@@ -156,7 +205,7 @@ async function getEntries(request, env, url) {
 
 const corsHeaders = {
 	"Access-Control-Allow-Origin": "*",
-	"Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
+	"Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS,DELETE",
 	"Access-Control-Max-Age": "86400",
 }
 
@@ -179,7 +228,7 @@ async function handleOptions(request) {
 		// Handle standard OPTIONS request.
 		return new Response(null, {
 			headers: {
-				Allow: "GET, HEAD, POST, OPTIONS",
+				Allow: "GET, HEAD, POST, OPTIONS, DELETE",
 			},
 		});
 	}
@@ -213,6 +262,10 @@ export default {
 		try {
 			if (request.method === "POST" && url.pathname === "/entry") {
 				return await postSaveEntry(request, env, url)
+			}
+
+			if (request.method === "DELETE" && url.pathname === "/entry") {
+				return await deleteEntry(request, env, url)
 			}
 
 			if (request.method === "GET" && url.pathname === "/entries") {
