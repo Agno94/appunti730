@@ -179,11 +179,11 @@ export default {
       return `${formatter.format(length / 10**6)}MB`
     },
 
-    canSave({ isPersonValid, isImportoValid, isYearValid, fileContent}) {
+    canSave({ isPersonValid, isImportoValid, isYearValid, isFilePresent}) {
       return (isPersonValid && isImportoValid && isYearValid && isFilePresent)
     },
 
-    b64EncodedFileContent({fileContent}) {
+    b64EncodedFileContent({fileContent, isFilePresent}) {
       if (!isFilePresent) return
       let b64Content
       try {
