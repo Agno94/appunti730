@@ -234,7 +234,7 @@ export default {
       if (this.sendingDeleteRequest) return
 
       this.sendingDeleteRequest = true
-      this.lastRequestErrorMessage = true
+      this.lastRequestErrorMessage = null
 
       fetch(`${import.meta.env.VITE_API_URL}/entry`, {
         method: "DELETE",
