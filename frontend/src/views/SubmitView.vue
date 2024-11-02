@@ -113,6 +113,7 @@
 </template>
 
 <script>
+import { requestToWorker } from '@/include/httpRequests.js'
 import { readBinaryFile } from '@/include/readFile.js'
 import { useUsersStore } from '@/stores/users'
 
@@ -251,12 +252,11 @@ export default {
       this.uploadErrorMessage = null
       this.uploadedResult = null
 
-      fetch(`${import.meta.env.VITE_API_URL}/entry`, {
-        method: "POST",
-        body: JSON.stringify(this.postPayload),
-        headers: {
-          "Authorization": this.usersStore.authorizationHeader,
-        }
+      requestToWorker({
+        method: 'POST',
+        path: '/entry',
+        auth: this.usersStore.authorizationHeader,
+        payload: this.postPayload,
       })
       .then(async (response) => {
         const body = await response.json()

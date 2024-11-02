@@ -55,6 +55,7 @@
 </template>
 
 <script>
+import { requestToWorker } from '@/include/httpRequests.js'
 import { useUsersStore } from '@/stores/users'
 
 export default {
@@ -89,11 +90,10 @@ export default {
     enterClicked(){
       this.isLoading = true
       this.responseMessage = null
-      fetch(`${this.apiUrl}/people`, {
-        method: "GET",
-        headers: {
-          "Authorization": `Bearer ${this.enteredPIN}`,
-        }
+      requestToWorker({
+        method: 'GET',
+        path: '/people',
+        auth: `Bearer ${this.enteredPIN}`
       })
       .then(async (response) => {
         const body = await response.json()

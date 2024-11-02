@@ -174,7 +174,6 @@ app.post('/entry', async (c) => {
 
 app.delete('/entry', async (c) => {
 	let eid, user, year
-  // throw new AppHTTPError(`Bad Request: invalid payload ${new Date}`, 400)
 	try {
 		const payload = await c.req.json()
 		eid = payload.id
@@ -214,7 +213,7 @@ app.delete('/entry', async (c) => {
 	})
 })
 
-app.get('/entries/:year/:person', async (c) => {
+app.get('/entries/:person/:year', async (c) => {
 	const year = c.req.param('year')
 	const name = c.req.param('person')
 

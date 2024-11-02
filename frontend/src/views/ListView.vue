@@ -90,6 +90,7 @@
 
 <script>
 // import readFile from '@/include/readFile.js'
+import { requestToWorker } from '@/include/httpRequests.js'
 import { useUsersStore } from '@/stores/users'
 
 export default {
@@ -168,19 +169,14 @@ export default {
 
     fetchList() {
       if (this.loadingFetch) return
-      let authorizationHeader = this.usersStore.authorizationHeader
 
       this.loadingFetch = true
       this.entriesList = []
 
-      let url = `${import.meta.env.VITE_API_URL}/entries?${this.query}`
-      url = `${import.meta.env.VITE_API_URL}/entries/${this.fiscalYear}/${this.personName}`
-
-      fetch(url, {
-        method: "GET",
-        headers: {
-          "Authorization": authorizationHeader,
-        }
+      requestToWorker({
+        method: 'GET',
+        path: `/entries/${this.personName}/${this.fiscalYear}`,
+        auth: this.usersStore.authorizationHeader,
       })
       .then(async (response) => {
         const body = await response.json()
@@ -236,16 +232,15 @@ export default {
       this.sendingDeleteRequest = true
       this.lastRequestErrorMessage = null
 
-      fetch(`${import.meta.env.VITE_API_URL}/entry`, {
-        method: "DELETE",
-        body: JSON.stringify({
+      requestToWorker({
+        method: 'DELETE',
+        path: `/entry`,
+        auth: this.usersStore.authorizationHeader,
+        payload: {
           id: entryId,
           year: this.fiscalYear,
           user: this.personName,
-        }),
-        headers: {
-          "Authorization": this.usersStore.authorizationHeader,
-        }
+        },
       })
       .then(async (response) => {
         const body = await response.json()
