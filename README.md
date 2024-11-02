@@ -1,6 +1,8 @@
 ## Appunti730
 
-Semplice mini applicazione per registrare spese del 730 in famiglia.
+Semplice mini applicazione per la famiglia con cui registrare le spese da segnare poi nel 730.
+
+Il progetto è stato pensato per girare su Cloudflare Workers e Pages.
 
 ### Worker
 
@@ -60,5 +62,5 @@ npm run lint
 * Customize configuration see [Vite Configuration Reference](https://vitejs.dev/config/).
 * Deploy
 ```sh
-npm deploy
+npm run deploy
 ```
