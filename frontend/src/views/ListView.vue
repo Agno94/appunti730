@@ -173,7 +173,10 @@ export default {
       this.loadingFetch = true
       this.entriesList = []
 
-      fetch(`${import.meta.env.VITE_API_URL}/entries?${this.query}`, {
+      let url = `${import.meta.env.VITE_API_URL}/entries?${this.query}`
+      url = `${import.meta.env.VITE_API_URL}/entries/${this.fiscalYear}/${this.personName}`
+
+      fetch(url, {
         method: "GET",
         headers: {
           "Authorization": token,

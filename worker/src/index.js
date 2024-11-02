@@ -2,106 +2,155 @@ import JSZip from 'jszip'
 import { v4 as uuid } from 'uuid'
 import _ from 'lodash'
 
+import { Hono } from 'hono'
+import { cors } from 'hono/cors'
 
-
-function isAuthOk(request, env) {
-	const authorizationHeader = request.headers.get('Authorization')
-	const token = env.TOKEN
-	console.log(`${authorizationHeader} == ${token}: ${(authorizationHeader === token)}`)
-	return (authorizationHeader === token)
-}
-
-function httpError(message, status) {
+function httpError(c, message, status) {
 	const body = {
 		error: true,
+		ok: false,
 		message,
 		status,
 	}
-	return Response.json(body, {status, })
+	return c.json(body, status)
 }
 
-async function getPeople(request, env, url) {
-	const peopleRaw = await env.KV_NAMESPACE.get('people')
-	if (!peopleRaw) throw {message: "Not ready"}
+class AppHTTPError extends Error {
+  constructor(message, httpStatusCode) {
+    super(message)
+    this.name = 'AppHTTPError'
+    this.httpStatusCode = httpStatusCode
+		this.isHTTPError = true
+  }
+}
+
+// Setup Hono + CORS
+const app = new Hono()
+app.get('/', (c) => c.json({ok: true}, 200))
+app.use('*', cors())
+
+// Autorizzazione
+app.use('*', async (c, next) => {
+	const authorizationHeader = c.req.header('Authorization')
+	const token = c.env.TOKEN
+	// Bearer
+	if (authorizationHeader !== token) {
+		console.log(`Denied: ${authorizationHeader} !== ${token}`)
+		return httpError(c, `Not authorized`, 403)
+	}
+	await next()
+})
+
+// Log e tempi richiesta
+app.use('*', async (c, next) => {
+  const start = Date.now()
+  await next()
+	const end = Date.now()
+  const ms = end - start
+  c.header('X-Response-Duration', `${ms}ms`)
+  c.header('X-Response-Timestamp', `${end}`)
+	console.log(`Request completed in ${ms}ms`)
+})
+
+// Gestione not-found ed errori
+app.notFound((c) => httpError(c, 'Not Found', 404))
+app.onError((err, c) => {
+	if (err.httpStatusCode && err.isHTTPError) {
+		return httpError(c, err.message, err.httpStatusCode)
+	}
+	return httpError(c, `Internal error: ${err.message.slice(0,30)}`, 500)
+})
+
+// ROUTE UTENTI
+async function fetchPersonByName(c, filter) {
+	const peopleRaw = await c.env.KV_NAMESPACE.get('people')
+	if (!peopleRaw) throw new Error("Not ready")
 
 	const people = JSON.parse(peopleRaw)
+	if (!filter) return people
+
+	const selectedPeople = people.filter(filter)
+	if (selectedPeople.length == 0) {
+		throw new AppHTTPError('Bad Request: found no user', 400)
+	}
+	if (selectedPeople.length > 1) {
+		throw new Error(`User collision: ${selectedPeople.length}`)
+	}
+	return selectedPeople
+}
+
+app.get('/people', async (c) => {
+	const people = await fetchPersonByName(c)
 
 	const responseBody = {
 		message: `Found ${people.length} people`,
 		data: people,
 	}
 
-	return Response.json(responseBody);
-}
+	return c.json(responseBody);
+})
 
-async function setPeople(request, env, url) {
+app.post('/people', async (c) => {
 	let people
 	let givenAdminToken
 	try {
-		const payload = await request.json()
+		const payload = await c.req.json()
 		people = payload.people
 		givenAdminToken = payload.adminToken
 	} catch (e) {
-		return httpError(`Bad request: invalid payload`, 400)
+		throw new AppHTTPError(`Bad request: invalid payload`, 400)
 	}
 
-	const adminToken = env.ADMIN_TOKEN
+	const adminToken = c.env.ADMIN_TOKEN
 	if (adminToken != givenAdminToken) {
-		return httpError('Not authorized', 403)
+		throw new AppHTTPError('Not authorized', 403)
 	}
 
 	const nofPeople = people.length
-	if (people.length < 1) {
-		return httpError(`Bad request: too short`, 400)
+	if (nofPeople < 1) {
+		throw new AppHTTPError(`Bad request: too short`, 400)
 	}
 
 	let nameSet = new Set(people.map(p => p.name))
 	let idSet = new Set(people.map(p => p.id))
 	if ((nameSet.size != nofPeople) || (idSet.size != nofPeople)) {
-		return httpError(`Bad request: collision`, 400)
+		throw new AppHTTPError(`Bad request: collision`, 400)
 	}
 
-	await env.KV_NAMESPACE.put('people', JSON.stringify(people))
+	await c.env.KV_NAMESPACE.put('people', JSON.stringify(people))
 
-	return Response.json({
+	return c.json({
 		message: `Saved ${people.length} people`
-	})
-}
+	}, 201)
+})
 
-async function postSaveEntry(request, env, url) {
+// ROUTE VOCI
+app.post('/entry', async (c) => {
 	let payload
 	try {
-		payload = await request.json()
+		payload = await c.req.json()
 	} catch (e) {
-		return httpError("Bad Request: invalid payload", 400)
+		throw new AppHTTPError('Bad Request: invalid payload', 400)
 	}
-	const {user, date, importo, year, content} = payload
 
+	const {user, date, importo, year, content} = payload
 	if (!user || !date || !importo || !content || !year) {
-		return httpError("Bad Request: Missing fields", 400)
+		throw new AppHTTPError('Bad Request: invalid payload', 400)
 	}
 
 	let originalMBs = content.length * 0.75 / 2**20
 	if (originalMBs > 6) {
-		return httpError(`File troppo grande: ${originalMBs}>6MiB`, 400)
+		throw new AppHTTPError(`File troppo grande: ${originalMBs}>6MiB`, 400)
 	}
 
-	const peopleRaw = await env.KV_NAMESPACE.get('people')
-	if (!peopleRaw) throw {message: "Not ready"}
-
-	const selectedPeople = JSON.parse(peopleRaw).filter(u => (u.name == user))
-	if (selectedPeople.length != 1) {
-		return httpError(`Bad Request: Invalid user ${user}`, 400)
-	}
-
+	const selectedPeople = await fetchPersonByName(c, u => (u.name == user))
 	const person = selectedPeople[0]
 	const uid = person.id
 	const eid = uuid()
-
 	const entryContentKey = `U${uid}::E${eid}::content`
 	const userEntriesKey = `U${uid}::entries${year}`
 
-	const userEntriesRaw = await env.KV_NAMESPACE.get(userEntriesKey)
+	const userEntriesRaw = await c.env.KV_NAMESPACE.get(userEntriesKey)
 	let userEntries = []
 	if (userEntriesRaw) {
 		userEntries = JSON.parse(userEntriesRaw)
@@ -114,73 +163,62 @@ async function postSaveEntry(request, env, url) {
 	}
 	userEntries.push(entry)
 
-	await env.KV_NAMESPACE.put(userEntriesKey, JSON.stringify(userEntries))
+	await c.env.KV_NAMESPACE.put(userEntriesKey, JSON.stringify(userEntries))
+	await c.env.KV_NAMESPACE.put(entryContentKey, content)
 
-	await env.KV_NAMESPACE.put(entryContentKey, content)
-
-	return Response.json({
+	return c.json({
 		message: `Entry saved with id ${eid}`,
 		data: entry,
 	})
-}
+})
 
-async function deleteEntry(request, env, url) {
+app.delete('/entry', async (c) => {
 	let eid, user, year
+  // throw new AppHTTPError(`Bad Request: invalid payload ${new Date}`, 400)
 	try {
-		const payload = await request.json()
+		const payload = await c.req.json()
 		eid = payload.id
 		user = payload.user
 		year = payload.year
 	} catch (e) {
-		return httpError("Bad Request: invalid payload", 400)
+		throw new AppHTTPError('Bad Request: invalid payload', 400)
 	}
 
 	if (!eid || !user || !year) {
-		return httpError("Bad Request: Missing fields", 400)
+		throw new AppHTTPError('Bad Request: Missing fields', 400)
 	}
 
-	const peopleRaw = await env.KV_NAMESPACE.get('people')
-	if (!peopleRaw) throw {message: "Not ready"}
-
-	const selectedPeople = JSON.parse(peopleRaw).filter(u => (u.name == user))
-	if (selectedPeople.length != 1) {
-		return httpError(`Bad Request: Invalid user ${user}`, 400)
-	}
-
+	const selectedPeople = await fetchPersonByName(c, u => (u.name == user))
 	const person = selectedPeople[0]
 	const uid = person.id
-
 	const entryContentKey = `U${uid}::E${eid}::content`
 	const userEntriesKey = `U${uid}::entries${year}`
 
-	const userEntriesRaw = await env.KV_NAMESPACE.get(userEntriesKey)
+	const userEntriesRaw = await c.env.KV_NAMESPACE.get(userEntriesKey)
 	let userEntries = []
 	if (userEntriesRaw) {
 		userEntries = JSON.parse(userEntriesRaw)
 	}
 	let filteredEntries = userEntries.filter(e => (e.id === eid))
 	if (filteredEntries.length !== 1) {
-		return httpError("Bad Request: id not found", 400)
+		throw new AppHTTPError('Bad Request: id not found', 400)
 	}
 	userEntries = userEntries.filter(e => (e.id != eid))
 
-	await env.KV_NAMESPACE.delete(entryContentKey)
-	await env.KV_NAMESPACE.put(userEntriesKey, JSON.stringify(userEntries))
+	await c.env.KV_NAMESPACE.delete(entryContentKey)
+	await c.env.KV_NAMESPACE.put(userEntriesKey, JSON.stringify(userEntries))
 
-	return Response.json({
+	return c.json({
 		message: `Entry with id ${eid} deleted`,
 		data: filteredEntries[0],
 	})
-}
+})
 
-async function getEntries(request, env, url) {
-	const year = url.searchParams.get("year")
-	const name = url.searchParams.get("person")
-	if (!name || !year) {
-		return httpError("Bad Request: Missing fields", 400)
-	}
+app.get('/entries/:year/:person', async (c) => {
+	const year = c.req.param('year')
+	const name = c.req.param('person')
 
-	const peopleRaw = await env.KV_NAMESPACE.get('people')
+	const peopleRaw = await c.env.KV_NAMESPACE.get('people')
 	if (!peopleRaw) throw {message: "Not ready"}
 
 	const selectedPeople = JSON.parse(peopleRaw).filter(u => (u.name == name))
@@ -191,100 +229,18 @@ async function getEntries(request, env, url) {
 	const person = selectedPeople[0]
 	const userEntriesKey = `U${person.id}::entries${year}`
 
-	const userEntriesRaw = await env.KV_NAMESPACE.get(userEntriesKey)
+	const userEntriesRaw = await c.env.KV_NAMESPACE.get(userEntriesKey)
 	let userEntries = []
 	if (userEntriesRaw) {
 		userEntries = JSON.parse(userEntriesRaw)
 	}
 
-	return Response.json({
+	return c.json({
 		message: `Found ${userEntries.length} entries for ${name} year ${year}`,
 		data: userEntries,
 	})
-}
+})
 
-const corsHeaders = {
-	"Access-Control-Allow-Origin": "*",
-	"Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS,DELETE",
-	"Access-Control-Max-Age": "86400",
-}
+// --
 
-async function handleOptions(request) {
-	if (
-		request.headers.get("Origin") !== null &&
-		request.headers.get("Access-Control-Request-Method") !== null &&
-		request.headers.get("Access-Control-Request-Headers") !== null
-	) {
-		// Handle CORS preflight requests.
-		return new Response(null, {
-			headers: {
-				...corsHeaders,
-				"Access-Control-Allow-Headers": request.headers.get(
-					"Access-Control-Request-Headers",
-				),
-			},
-		});
-	} else {
-		// Handle standard OPTIONS request.
-		return new Response(null, {
-			headers: {
-				Allow: "GET, HEAD, POST, OPTIONS, DELETE",
-			},
-		});
-	}
-}
-
-
-export default {
-
-	async fetch(request, env, ctx) {
-		if (request.method === 'OPTIONS') {
-			return handleOptions(request)
-		}
-		let response = await this.handleRequest(request, env, ctx)
-		response.headers.set("Access-Control-Allow-Origin", '*')
-		return response
-	},
-
-	async handleRequest(request, env, ctx) {
-		const url = new URL(request.url)
-
-		if (request.method === 'GET' && url.pathname === '/') {
-			return Response.json({ok: true})
-		}
-
-		console.log(`Requested ${navigator.userAgent} at path ${url.pathname}!`);
-
-		if (!isAuthOk(request, env)) {
-			return httpError(`Not authorized`, 403)
-		}
-
-		try {
-			if (request.method === "POST" && url.pathname === "/entry") {
-				return await postSaveEntry(request, env, url)
-			}
-
-			if (request.method === "DELETE" && url.pathname === "/entry") {
-				return await deleteEntry(request, env, url)
-			}
-
-			if (request.method === "GET" && url.pathname === "/entries") {
-				return await getEntries(request, env, url)
-			}
-
-			if (request.method === "GET" && url.pathname === "/people") {
-				return await getPeople(request, env, url)
-			}
-
-			if (request.method === "POST" && url.pathname === "/people") {
-				return await setPeople(request, env, url)
-			}
-		} catch (error) {
-			console.log('Error:', error)
-			return httpError(`Internal error: ${error.message.slice(0,20)}`, 500)
-		}
-
-    return httpError("Not found", 404)
-	},
-
-}
+export default app
