@@ -33,9 +33,9 @@ app.use('*', cors())
 app.use('*', async (c, next) => {
 	const authorizationHeader = c.req.header('Authorization')
 	const token = c.env.TOKEN
-	// Bearer
-	if (authorizationHeader !== token) {
-		console.log(`Denied: ${authorizationHeader} !== ${token}`)
+	// 
+	if (authorizationHeader !== `Bearer ${token}`) {
+		console.log(`Denied: provided token=${authorizationHeader}`)
 		return httpError(c, `Not authorized`, 403)
 	}
 	await next()

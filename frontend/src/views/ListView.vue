@@ -168,7 +168,7 @@ export default {
 
     fetchList() {
       if (this.loadingFetch) return
-      let token = this.usersStore.getToken
+      let authorizationHeader = this.usersStore.authorizationHeader
 
       this.loadingFetch = true
       this.entriesList = []
@@ -179,7 +179,7 @@ export default {
       fetch(url, {
         method: "GET",
         headers: {
-          "Authorization": token,
+          "Authorization": authorizationHeader,
         }
       })
       .then(async (response) => {
@@ -232,7 +232,6 @@ export default {
 
     deleteEntry(entryId) {
       if (this.sendingDeleteRequest) return
-      let token = this.usersStore.getToken
 
       this.sendingDeleteRequest = true
       this.lastRequestErrorMessage = true
@@ -245,7 +244,7 @@ export default {
           user: this.personName,
         }),
         headers: {
-          "Authorization": token,
+          "Authorization": this.usersStore.authorizationHeader,
         }
       })
       .then(async (response) => {

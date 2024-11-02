@@ -92,7 +92,7 @@ export default {
       fetch(`${this.apiUrl}/people`, {
         method: "GET",
         headers: {
-          "Authorization": this.enteredPIN,
+          "Authorization": `Bearer ${this.enteredPIN}`,
         }
       })
       .then(async (response) => {

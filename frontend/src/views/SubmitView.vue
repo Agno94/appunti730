@@ -245,7 +245,6 @@ export default {
     submitEntry() {
       if (this.uploading) return
       if (!this.canSave) return
-      let token = this.usersStore.getToken
 
       this.uploading = true
       this.uploadSucessMessage = null
@@ -256,7 +255,7 @@ export default {
         method: "POST",
         body: JSON.stringify(this.postPayload),
         headers: {
-          "Authorization": token,
+          "Authorization": this.usersStore.authorizationHeader,
         }
       })
       .then(async (response) => {

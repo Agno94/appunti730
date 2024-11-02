@@ -10,6 +10,7 @@ export const useUsersStore = defineStore('users', {
 
   getters: {
     getToken: (state) => state.token,
+    authorizationHeader: (state) => `Bearer ${state.token}`,
     hasLoadedPeople: (state) => state._hasLoadedPeople,
     getPeople: (state) => state.people || [],
   },
