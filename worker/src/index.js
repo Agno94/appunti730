@@ -29,15 +29,28 @@ const app = new Hono()
 app.get('/', (c) => c.json({ok: true}, 200))
 app.use('*', cors())
 
-// Autorizzazione
+// Rate limit + Autorizzazione
 app.use('*', async (c, next) => {
+	// Rate Limit
+	let rateLimit, rateKey
+	rateKey = `AUTH:${c.req.raw.cf.asn}:${c.req.header('CF-Connecting-IP')}`
+	const hasFailedLastAuth = (await c.env.KV_NAMESPACE.get(rateKey)) == 'FAIL'
+	if (hasFailedLastAuth) {
+		rateLimit = await c.env.RATE_LIMITER_FAILEDAUTH.limit({key: ''})
+	} else {
+		rateLimit = await c.env.RATE_LIMITER_AUTHNOTFAILED.limit({key: rateKey})
+	}
+	if (!rateLimit.success) return httpError(c, 'Too Many Request: wait 60s', 429)
+
+	// Auth
 	const authorizationHeader = c.req.header('Authorization')
 	const token = c.env.TOKEN
-	// 
 	if (authorizationHeader !== `Bearer ${token}`) {
-		console.log(`Denied: provided token=${authorizationHeader}`)
+		console.log(`Denied: provided token=${authorizationHeader} rateKey=${rateKey}`)
+		await c.env.KV_NAMESPACE.put(rateKey, 'FAIL')
 		return httpError(c, `Not authorized`, 403)
 	}
+	if (hasFailedLastAuth) await c.env.KV_NAMESPACE.delete(rateKey)
 	await next()
 })
 
@@ -58,6 +71,7 @@ app.onError((err, c) => {
 	if (err.httpStatusCode && err.isHTTPError) {
 		return httpError(c, err.message, err.httpStatusCode)
 	}
+	console.error(err)
 	return httpError(c, `Internal error: ${err.message.slice(0,30)}`, 500)
 })
 
@@ -217,14 +231,7 @@ app.get('/entries/:person/:year', async (c) => {
 	const year = c.req.param('year')
 	const name = c.req.param('person')
 
-	const peopleRaw = await c.env.KV_NAMESPACE.get('people')
-	if (!peopleRaw) throw {message: "Not ready"}
-
-	const selectedPeople = JSON.parse(peopleRaw).filter(u => (u.name == name))
-	if (selectedPeople.length != 1) {
-		return httpError(`Bad Request: Invalid user ${user}`, 400)
-	}
-
+	const selectedPeople = await fetchPersonByName(c, u => (u.name == name))
 	const person = selectedPeople[0]
 	const userEntriesKey = `U${person.id}::entries${year}`
 

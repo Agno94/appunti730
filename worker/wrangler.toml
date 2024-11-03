@@ -1,7 +1,7 @@
 #:schema node_modules/wrangler/config-schema.json
 name = "appunti730-worker"
 main = "src/index.js"
-compatibility_date = "2024-10-01"
+compatibility_date = "2024-09-25"
 # type = "javascript"
 
 # Workers Logs
@@ -112,3 +112,16 @@ id = "0f8092ebf6f542a1af358da6353501ce"
 # [[vectorize]]
 # binding = "MY_INDEX"
 # index_name = "my-index"
+
+# The rate limiting API is in open beta.
+[[unsafe.bindings]]
+name = "RATE_LIMITER_AUTHNOTFAILED"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 150, period = 60 }
+
+[[unsafe.bindings]]
+name = "RATE_LIMITER_FAILEDAUTH"
+type = "ratelimit"
+namespace_id = "1002"
+simple = { limit = 2, period = 60 }
