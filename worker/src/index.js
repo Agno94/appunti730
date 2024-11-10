@@ -148,12 +148,19 @@ app.post('/entry', async (c) => {
 	}
 
 	const {user, date, importo, year, content} = payload
+	let {contentFileType, contentFileName} = payload
 	if (!user || !date || !importo || !content || !year) {
 		throw new AppHTTPError('Bad Request: invalid payload', 400)
 	}
 
+	if (contentFileType == null) contentFileType = 'application/octet-stream'
+	if (contentFileType.length > 50) contentFileType = ''
+	if (!/[a-z]+\/[a-z\-\.\;\=\+ ]+/.test(contentFileType)) {
+		throw new AppHTTPError('Bad request: invalid content file type')
+	}
+
 	let originalMBs = content.length * 0.75 / 2**20
-	if (originalMBs > 6) {
+	if (originalMBs > MAX_ENTRY_FILE_SIZE) {
 		throw new AppHTTPError(`File troppo grande: ${originalMBs}>6MiB`, 400)
 	}
 
@@ -164,16 +171,31 @@ app.post('/entry', async (c) => {
 	const entryContentKey = `U${uid}::E${eid}::content`
 	const userEntriesKey = `U${uid}::entries${year}`
 
+	if (!contentFileName) {
+		let extension
+		if (contentFileType == 'application/octet-stream') extension = 'jpg'
+		else extension = contentFileTypesplit('/')[1]
+		contentFileName = `${eid}.${extension}`
+	} else if (contentFileName.includes('/')) {
+		throw new AppHTTPError('Bad request: invalid content file name', 400)
+	} else if (contentFileType.length > 50) {
+		contentFileType = contentFileType.slice(contentFileType.length - 50)
+	}
+	contentFileName = `${date}-${contentFileName}`
+
 	const userEntriesRaw = await c.env.KV_NAMESPACE.get(userEntriesKey)
 	let userEntries = []
 	if (userEntriesRaw) {
 		userEntries = JSON.parse(userEntriesRaw)
 	}
+	
 	const entry = {
 		uid: uid,
 		id: eid,
 		importo,
 		date,
+		contentFileType,
+		contentFileName,
 	}
 	userEntries.push(entry)
 

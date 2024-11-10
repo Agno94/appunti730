@@ -199,6 +199,7 @@ export default {
         '#',
         'Data',
         'Importo',
+        'Nome File Giustificativo',
       ].join(';')
 
       let csv = this.entriesList.reduce( (csv, e, index) => {
@@ -206,6 +207,7 @@ export default {
           e.id,
           e.date,
           e.importo,
+          e.contentFileName,
         ].map(v => String(v))
 
         return index < length

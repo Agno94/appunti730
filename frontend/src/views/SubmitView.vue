@@ -136,6 +136,7 @@ export default {
 
       fileContent: null,
       fileError: null,
+      filetype: null,
       filename: null,
 
       uploadSucessMessage: null,
@@ -190,10 +191,9 @@ export default {
       try {
         const binString = Array.from(fileContent, (byte) => String.fromCodePoint(byte),).join("")
         b64Content = btoa(binString)
-        console.log(new Date, 'b64content', b64Content.length)
         return b64Content
       } catch (e) {
-        console.log(e)
+        console.error(e)
         return
       }
     },
@@ -207,6 +207,8 @@ export default {
         importo: entryImporto,
         year: entryYear,
         content: b64EncodedFileContent,
+        contentFileType: this.filetype,
+        contentFileName: this.filename,
       }
     }
 
@@ -218,6 +220,7 @@ export default {
       this.fileContent = null
       this.fileError = null
       this.filename = null
+      this.filetype = null
 
       const files = event.target.files
       if (!files || !files.length) return
@@ -225,6 +228,7 @@ export default {
       if (!file) return
 
       this.filename = file.name
+      this.filetype = file.type
       this.uploading = true
       readBinaryFile(file)
         .then((fileContent) => {
