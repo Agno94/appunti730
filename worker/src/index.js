@@ -5,6 +5,12 @@ import _ from 'lodash'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 
+// -- Costanti e utils di base
+
+const MAX_FILES_IN_ZIP = 50
+const MAX_ZIP_FILE_SIZE = 48
+const MAX_ENTRY_FILE_SIZE = 6
+
 function httpError(c, message, status) {
 	const body = {
 		error: true,
@@ -24,10 +30,16 @@ class AppHTTPError extends Error {
   }
 }
 
-// Setup Hono + CORS
+// -- SETUP GENERALE
+
+// Hono e CORS
 const app = new Hono()
 app.get('/', (c) => c.json({ok: true}, 200))
-app.use('*', cors())
+app.use('*', cors({
+	exposeHeaders: [
+		'Content-Disposition', 'X-Download-From', 'X-Download-To', 'X-Download-Max',
+	],
+}))
 
 // Rate limit + Autorizzazione
 app.use('*', async (c, next) => {
@@ -75,7 +87,8 @@ app.onError((err, c) => {
 	return httpError(c, `Internal error: ${err.message.slice(0,30)}`, 500)
 })
 
-// ROUTE UTENTI
+// -- ROUTE UTENTI
+
 async function fetchPersonByName(c, filter) {
 	const peopleRaw = await c.env.KV_NAMESPACE.get('people')
 	if (!peopleRaw) throw new Error("Not ready")
@@ -93,6 +106,7 @@ async function fetchPersonByName(c, filter) {
 	return selectedPeople
 }
 
+// GET elenco persone
 app.get('/people', async (c) => {
 	const people = await fetchPersonByName(c)
 
@@ -104,6 +118,7 @@ app.get('/people', async (c) => {
 	return c.json(responseBody);
 })
 
+// POST aggiornamento elenco persona (riservata)
 app.post('/people', async (c) => {
 	let people
 	let givenAdminToken
@@ -138,7 +153,9 @@ app.post('/people', async (c) => {
 	}, 201)
 })
 
-// ROUTE VOCI
+// -- ROUTE VOCI
+
+// POST aggiunta singola voce
 app.post('/entry', async (c) => {
 	let payload
 	try {
@@ -208,6 +225,7 @@ app.post('/entry', async (c) => {
 	})
 })
 
+// DELETE eliminazione singola voce
 app.delete('/entry', async (c) => {
 	let eid, user, year
 	try {
@@ -249,6 +267,7 @@ app.delete('/entry', async (c) => {
 	})
 })
 
+// GET lista voci per persona e anno
 app.get('/entries/:person/:year', async (c) => {
 	const year = c.req.param('year')
 	const name = c.req.param('person')
@@ -269,6 +288,97 @@ app.get('/entries/:person/:year', async (c) => {
 	})
 })
 
-// --
+// -- ROUTE DOWNLOAD FILE
+
+// GET download file giustificativo per singola voce
+app.get('/entries/:person/:year/download/:eid', async (c) => {
+	const year = c.req.param('year')
+	const name = c.req.param('person')
+	const eid = c.req.param('eid')
+
+	const selectedPeople = await fetchPersonByName(c, u => (u.name == name))
+	const person = selectedPeople[0]
+	const userEntriesKey = `U${person.id}::entries${year}`
+	const uid = person.id
+	const entryContentKey = `U${uid}::E${eid}::content`
+
+	const userEntriesRaw = await c.env.KV_NAMESPACE.get(userEntriesKey)
+	let userEntries = []
+	if (userEntriesRaw) {
+		userEntries = JSON.parse(userEntriesRaw).filter(e => (e.id == eid))
+	}
+	if (userEntries.length != 1) return new AppHTTPError(`Entry not found`, 404)
+	const entry = userEntries[0]
+	let b64Content = await c.env.KV_NAMESPACE.get(entryContentKey)
+	const binaryContent = Uint8Array.from(atob(b64Content), c => c.charCodeAt(0))
+
+	return c.body(binaryContent, 200, {
+		'Content-Type': entry.contentFileType,
+		'Content-Disposition': `attachment; filename="${entry.contentFileName}"`,
+	})
+})
+
+// GET download archivi(zip) con file giustificativi per voci multiple
+app.get('/entries/:person/:year/download', async (c) => {
+	const year = c.req.param('year')
+	const name = c.req.param('person')
+
+	const firstIndex = Number.parseInt(c.req.query('first')) || 0
+
+	const selectedPeople = await fetchPersonByName(c, u => (u.name == name))
+	const person = selectedPeople[0]
+	const userEntriesKey = `U${person.id}::entries${year}`
+	const uid = person.id
+
+	const userEntriesRaw = await c.env.KV_NAMESPACE.get(userEntriesKey)
+	let userEntries = []
+	if (userEntriesRaw) {
+		userEntries = JSON.parse(userEntriesRaw)
+	}
+
+	if (firstIndex >= userEntries.length) return c.text(null, 204)
+
+	const zipGenerator = new JSZip()
+	let filesTotalSize = 0
+	let response = { el: [], }
+	let filesCount = 0
+	let entryIndex = firstIndex
+	while (filesCount < MAX_FILES_IN_ZIP && entryIndex < userEntries.length) {
+		filesCount += 1
+		let entry = userEntries[entryIndex]
+		let eid = entry.id
+		let entryContentKey = `U${uid}::E${eid}::content`
+		let b64Content = await c.env.KV_NAMESPACE.get(entryContentKey)
+		filesTotalSize += b64Content.length * 0.75 / 2**20
+		if (filesTotalSize > MAX_ZIP_FILE_SIZE) break
+
+		zipGenerator.file(entry.contentFileName, b64Content, {base64: true})
+
+		response.el.push([eid, entryContentKey, b64Content.length])
+
+		entryIndex += 1
+	}
+
+	const zipContent = await zipGenerator.generateAsync({
+		type: "uint8array",
+		compression: "DEFLATE",
+    compressionOptions: {
+        level: 1
+    }
+	})
+
+	const archiveFileName = `archive${year}_${name}_from${firstIndex}to${entryIndex}.zip`
+
+	return c.body(zipContent, 200, {
+		'Content-Type': 'application/zip',
+		'Content-Disposition': `attachment; filename="${archiveFileName}"`,
+		'X-Download-ContentRawSize': `${filesTotalSize}MiB`,
+		'X-Download-From': `${firstIndex}`,
+		'X-Download-To': `${entryIndex}`,
+		'X-Download-Max': `${userEntries.length}`,
+	})
+})
+
+// -- FINE
 
 export default app

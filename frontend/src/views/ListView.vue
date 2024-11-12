@@ -34,8 +34,8 @@
       <div class="column is-narrow" >
         <button class="button is-link is-outlined mr-1" title="Refresh"
           @click="fetchList" :disabled="!canFetch || loadingFetch">⭮</button>
-          <button class="button is-info is-outlined mr-1" title="Save"
-          @click="saveTable" :disabled="!hasAnyEntry">
+          <button class="button is-info is-outlined mr-1" title="Salva giustificativi"
+          @click="saveArchivesClicked" :disabled="!hasAnyEntry || downloadingArchives">
           <span v-if="hasAnyEntry">📦</span><span v-else>&nbsp;</span>
         </button>
         <button class="button is-info is-outlined" title="Download tabella"
@@ -52,6 +52,11 @@
       </div>
       <div class="message-body is-size-7">{{ lastRequestErrorMessage }}</div>
     </article>
+
+    <section class="block" v-if="downloadingArchives">
+      <span>⭮ Downloading ... </span>
+      <span class="is-size-7">Scaricate {{ downloadArchivesEntryCount }}/{{ downloadArchivesEntryTotal }} voci, salvati {{ downloadArchivesCount }} files</span>
+    </section>
 
     <p v-if="!canFetch">Seleziona filtri</p>
 
@@ -74,7 +79,7 @@
           <td>{{entry.importo}}</td>
           <td>
             <span v-if="downloadingOneRequest">⭮</span>
-            <a v-else @click="downloadEntryContent(entry.id)" title="Download giustificativo">📃</a>
+            <a v-else @click="downloadEntryContent(entry)" title="Download giustificativo">📃</a>
           </td>
           <td>
             <span v-if="sendingDeleteRequest">⭮</span>
@@ -113,6 +118,10 @@ export default {
 
       sendingDeleteRequest: false,
       downloadingOneRequest: false,
+      downloadingArchives: false,
+      downloadArchivesEntryCount: null,
+      downloadArchivesEntryTotal: null,
+      downloadArchivesCount: null,
       lastRequestErrorMessage: null,
 
       downloadOneFileContent: null,
@@ -154,7 +163,7 @@ export default {
 
   methods: {
 
-    downloadPlain(content, filename, option) {
+    async downloadPlain(content, filename, option) {
       let blob  = new Blob( [content, ], option, )
       let link  = document.createElement('a')
 
@@ -220,12 +229,119 @@ export default {
       this.downloadPlain(csv, filename, {type: 'text/csv'})
     },
 
-    saveTable() {
-      // ..
+    async downloadArchives() {
+      const path = `/entries/${this.personName}/${this.fiscalYear}/download`
+      const defaultFileNameSuffix = `archive${this.fiscalYear}_${this.personName}_`
+      const authHeader = this.usersStore.authorizationHeader
+
+      this.downloadArchivesCount = 0
+      this.downloadArchivesEntryCount = 0
+      this.downloadArchivesEntryTotal = this.entriesList.length
+
+      let downloadComplete = false
+      let saveFilePromise = null
+
+      while (!downloadComplete) {
+        let response = await requestToWorker({
+            method: 'GET',
+            path: `${path}?first=${this.downloadArchivesEntryCount}`,
+            auth: authHeader,
+          })
+          .then(async response => {
+            if (response.status === 204) {
+              downloadComplete = true
+              return
+            }
+            if (response.status !== 200) {
+              const body = await response.json()
+              if (body.error) throw body
+              else throw {message: 'Unkwown Error'}
+            }
+            return response
+          })
+          .catch((err) => {
+            this.lastRequestErrorMessage = err.message
+            return
+          })
+
+        if (!response) break
+
+        const content = await response.arrayBuffer()
+
+        let fileName = `archive${defaultFileNameSuffix}_from${this.downloadArchivesEntryCount}.zip`
+        const contentDisposition = response.headers.get('Content-Disposition')
+        if (contentDisposition && contentDisposition.includes('filename=')) {
+          const matches = contentDisposition.match(/filename="(.+?)"/)
+          if (matches && matches[1]) fileName = matches[1]
+        }
+
+        const downloadFromHeader = parseInt(response.headers.get('X-Download-From')) || 0
+        const downloadToHeader = parseInt(response.headers.get('X-Download-To')) || 0
+        const downloadMaxHeader = parseInt(response.headers.get('X-Download-Max')) || 0
+
+        if (downloadToHeader == downloadMaxHeader) {downloadComplete = true}
+        if (this.downloadArchivesEntryCount == downloadToHeader) {
+          throw new Error('No download progress')
+        }
+        if (downloadFromHeader != this.downloadArchivesEntryCount) {
+          throw new Error(`X-Download-From: ${downloadFromHeader} != ${this.downloadArchivesEntryCount}`)
+        }
+        this.downloadArchivesEntryCount = downloadToHeader
+        this.downloadArchivesEntryTotal = downloadMaxHeader
+
+        if (saveFilePromise) await saveFilePromise
+        saveFilePromise = this.downloadPlain(content, fileName, {type: 'application/zip'})
+          .then(() => {this.downloadArchivesCount += 1})
+
+        if (this.downloadArchivesEntryCount >= this.downloadArchivesEntryTotal) {
+          downloadComplete = true
+          break
+        }
+      }
+
+      if (saveFilePromise) await saveFilePromise
     },
 
-    downloadEntryContent(entryId) {
-      // ..
+    saveArchivesClicked() {
+      this.downloadingArchives = true
+
+      this.downloadArchives()
+        .catch((err) => {
+          console.error('Error during archive download:', err)
+        })
+        .then(() => {
+          setTimeout(() => {this.downloadingArchives = false}, 1000)
+        })
+
+    },
+
+    downloadEntryContent(entry) {
+      if (this.downloadingOneRequest) return
+      const entryId = entry.id
+
+      this.downloadingOneRequest = true
+      this.lastRequestErrorMessage = null
+
+      requestToWorker({
+        method: 'GET',
+        path: `/entries/${this.personName}/${this.fiscalYear}/download/${entryId}`,
+        auth: this.usersStore.authorizationHeader,
+      })
+      .then(async (response) => {
+        if (response.status !== 200) {
+          const body = await response.json()
+          if (body.error) throw body
+          else throw {message: 'Unkwown Error'}
+        }
+        const content = await response.arrayBuffer()
+        this.downloadPlain(content, entry.contentFileName, {type: entry.contentFileType})
+      })
+      .catch((err) => {
+        this.lastRequestErrorMessage = err.message
+      })
+      .then(() => {
+        this.downloadingOneRequest = false
+      })
     },
 
     deleteEntry(entryId) {
