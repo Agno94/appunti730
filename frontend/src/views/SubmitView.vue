@@ -20,7 +20,6 @@
       <div class="control">
         <div class="select is-fullwidth"  :class="{'is-warning': !isYearValid}">
           <select v-model="entryYear">
-            <option value=2023>2023 (modello 730 2024)</option>
             <option value=2024>2024 (modello 730 2025)</option>
             <option value=2025>2025 (modello 730 2026)</option>
             <option value=2026>2026 (modello 730 2027)</option>
@@ -132,7 +131,7 @@ export default {
       personName: null,
       entryImporto: 0,
       entryDate: null,
-      entryYear: 2023,
+      entryYear: 2024,
 
       fileContent: null,
       fileError: null,

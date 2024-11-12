@@ -22,7 +22,6 @@
         <div class="control">
           <div class="select is-fullwidth" :class="{'is-warning': !isYearValid}">
             <select v-model="fiscalYear">
-              <option value=2023>2023 (modello 730 2024)</option>
               <option value=2024>2024 (modello 730 2025)</option>
               <option value=2025>2025 (modello 730 2026)</option>
               <option value=2026>2026 (modello 730 2027)</option>
@@ -111,7 +110,7 @@ export default {
       usersStore,
 
       personName: null,
-      fiscalYear: 2023,
+      fiscalYear: 2024,
 
       loadingFetch: false,
       entriesList: [],
