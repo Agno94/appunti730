@@ -59,20 +59,22 @@
 
     <p v-if="!canFetch">Seleziona filtri</p>
 
+    <p v-else-if="loadingFetch">⭮ Caricando...</p>
+
     <p v-else-if="!entriesList.length">Nessuna voce</p>
 
     <table class="table is-fullwidth" v-else>
       <thead>
         <tr>
-          <th>#</th>
-          <th>Data</th>
-          <th>Importo</th>
+          <th @click="this.sortField = null">#</th>
+          <th @click="this.sortField = 'date'">Data<span v-if="sortField == 'date'"> &#x2b07;</span></th>
+          <th @click="this.sortField = 'importo'">Importo<span v-if="sortField == 'importo'"> &#x2b07;</span></th>
           <th></th>
           <th></th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="entry in entriesList" :key="entry.id">
+        <tr v-for="entry in rows" :key="entry.id">
           <td :title="entry.id">#</td>
           <td>{{entry.date}}</td>
           <td>{{entry.importo}}</td>
@@ -86,6 +88,11 @@
           </td>
           <td></td>
         </tr>
+        <tr>
+          <td></td>
+          <td class="has-text-right">Somma:</td>
+          <td>{{ sumImporto }}</td>
+        </tr>
       </tbody>
     </table>
 
@@ -93,6 +100,7 @@
 </template>
 
 <script>
+import _ from 'lodash'
 // import readFile from '@/include/readFile.js'
 import { requestToWorker } from '@/include/httpRequests.js'
 import { useUsersStore } from '@/stores/users'
@@ -114,6 +122,7 @@ export default {
 
       loadingFetch: false,
       entriesList: [],
+      sortField: null,
 
       sendingDeleteRequest: false,
       downloadingOneRequest: false,
@@ -157,6 +166,17 @@ export default {
       if (!canFetch) return false
       return entriesList.length
     },
+
+    rows({entriesList, sortField}) {
+      if (!this.hasAnyEntry) return []
+      if (!sortField) return entriesList
+      return _.sortBy(entriesList, sortField)
+    },
+
+    sumImporto({entriesList}) {
+      if (!this.hasAnyEntry) return null
+      return _.sumBy(entriesList, 'importo')
+    }
 
   },
 
